@@ -602,7 +602,7 @@ namespace IngameScript
             public StateCategory StateCat => stateCategories.GetValueOrDefault(state, StateCategory.InUse);
 
 
-            public string Description => description;
+            public string Warning => description;
 
             public void Update(IController control, Event e, ref AirlockStatus status)
             {

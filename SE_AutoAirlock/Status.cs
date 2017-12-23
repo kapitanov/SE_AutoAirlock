@@ -21,6 +21,7 @@ namespace IngameScript
             public int WorkingCount;
             public int DamagedCount;
             public bool IsDepressurized;
+            public bool IsAirtight;
             public bool IsPressurized;
 
             public void Print(Printer sb, string title)
@@ -163,6 +164,7 @@ namespace IngameScript
 
                 status.Status = airvent.Status;
                 status.OxygenLevel = Math.Max(status.OxygenLevel, airvent.GetOxygenLevel());
+                status.IsAirtight = airvent.CanPressurize;
 
                 if (airvent.IsFunctional)
                 {

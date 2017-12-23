@@ -130,10 +130,26 @@ namespace IngameScript
             status.InternalDoors.Print(sb, "ВНУТР. ДВЕРЬ");
             status.AirVents.Print(sb, "ДАВЛЕНИЕ");
 
-            if (!string.IsNullOrEmpty(fsm.Description))
+            var hasWarnings = !string.IsNullOrEmpty(fsm.Warning);
+            var hasAirlockHullBreach = status.InternalDoors.IsClosed && status.ExternalDoors.IsClosed && !status.AirVents.IsAirtight;
+            var hasShipHullBreach = status.InternalDoors.IsOpen && status.ExternalDoors.IsClosed && !status.AirVents.IsAirtight;
+
+            if (hasWarnings || hasAirlockHullBreach || hasShipHullBreach)
             {
                 sb.Title("ВНИМАНИЕ");
-                sb.Value(fsm.Description);
+                if (hasWarnings) {
+                    sb.Value(fsm.Warning);
+                }
+
+                if (hasAirlockHullBreach)
+                {
+                    sb.Value(CHAR_RED, "Шлюз негерметичен");
+                }
+
+                if (hasShipHullBreach)
+                {
+                    sb.Value(CHAR_RED, "Корабль негерметичен");
+                }
             }
 
             sb.End();
