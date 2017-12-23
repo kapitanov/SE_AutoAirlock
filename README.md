@@ -2,6 +2,8 @@
 
 Airlock controller script for Space Engineers
 
+![](preview.png)
+
 ## Features
 
 * Controls an airlock with sensors
