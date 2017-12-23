@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace IngameScript
 {
@@ -6,255 +7,638 @@ namespace IngameScript
     {
         enum Event
         {
-            ENTER_1,
-            ENTER_2,
-            ENTER_3,
-            EXIT_1,
-            EXIT_2,
-            EXIT_3,
+            INIT,
+            TIMER,
+            RESET,
+
+            ENTER_SHIP_APPROACHED,
+            ENTER_SHIP_INSIDE,
+            ENTER_SHIP_LEFT,
+
+            EXIT_SHIP_APPROACHED,
+            EXIT_SHIP_INSIDE,
+            EXIT_SHIP_LEFT,
         }
 
-        enum State
+        enum StateCategory
         {
+            Ready,
+            Locked,
+            Transition,
+            InUse
+        }
+
+        sealed class FSM
+        {
+            public struct StateCtx
+            {
+                public Event Event;
+                public AirlockStatus Status;
+                public double Time;
+                public IController Control;
+            }
+
+            public struct StateResult
+            {
+                public StateFunc NextState;
+                public string Description;
+            }
+
+            private static StateResult ToState(StateFunc state, string description = null)
+            {
+                return new StateResult
+                {
+                    NextState = state,
+                    Description = description
+                };
+            }
+
+            public delegate StateResult? StateFunc(ref StateCtx ctx);
+
             // Шлюзы закрыты
-            IDLE,
+            public static StateResult? IDLE(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: false);
+                        ctx.Control.InternalDoor(open: false);
+                        ctx.Control.AuxDoors(open: false);
+                        ctx.Control.Airvents(pressurize: true);
+                        ctx.Control.Lights(LightMode.Off);
+                        break;
+
+                    case Event.ENTER_SHIP_APPROACHED:
+                        return ToState(ENTER_DEPRESSURIZING);
+
+                    case Event.EXIT_SHIP_APPROACHED:
+                        return ToState(EXIT_INNER_OPENING);
+
+                    case Event.TIMER:
+                        if (ctx.Status.IsObstructed)
+                        {
+                            return ToState(OBSTRUCTED);
+                        }
+                        break;
+
+                }
+
+                return null;
+            }
+
             // Шлюзы закрыты, кулдаун
-            COOLDOWN,
-
-            // сброс
-            ENTER_DEPRESSURIZING,
-            // открытие двери (наружу)
-            ENTER_DEPRESSURIZED,
-            // закрытие двери (наружу)
-            ENTER_OUTER_CLOSING,
-            // набор давления
-            ENTER_PRESSURIZING,
-            // открытие двери (внутрь)
-            ENTER_PRESSURIZED,
-
-
-            // открытие двери (внутрь)
-            EXIT_INNER_OPEN,
-            // закрытие двери (внутрь)
-            EXIT_INNER_CLOSING,
-            // сброс давления
-            EXIT_DEPRESSURIZING,
-            // открытие двери (наружу)
-            EXIT_OUTER_OPEN,
-        }
-
-        private void HandleEvent(Event e)
-        {
-            switch (e)
+            public static StateResult? COOLDOWN(ref StateCtx ctx)
             {
-                case Event.ENTER_1:
-                    switch (state)
-                    {
-                        case State.IDLE:
-                            EnterState(State.ENTER_DEPRESSURIZING);
-                            break;
-                    }
-                    break;
-                case Event.ENTER_2:
-                    switch (state)
-                    {
-                        case State.ENTER_DEPRESSURIZED:
-                            EnterState(State.ENTER_OUTER_CLOSING);
-                            break;
-                    }
-                    break;
-                case Event.ENTER_3:
-                    switch (state)
-                    {
-                        case State.ENTER_PRESSURIZED:
-                            descr = "";
-                            EnterState(State.COOLDOWN);
-                            break;
-                    }
-                    break;
-
-                case Event.EXIT_1:
-                    switch (state)
-                    {
-                        case State.IDLE:
-                            EnterState(State.EXIT_INNER_OPEN);
-                            break;
-                    }
-                    break;
-                case Event.EXIT_2:
-                    switch (state)
-                    {
-                        case State.EXIT_INNER_OPEN:
-                            EnterState(State.EXIT_INNER_CLOSING);
-                            break;
-                    }
-                    break;
-                case Event.EXIT_3:
-                    switch (state)
-                    {
-                        case State.EXIT_OUTER_OPEN:
-                            descr = "";
-                            EnterState(State.COOLDOWN);
-                            break;
-                    }
-                    break;
-            }
-        }
-
-        private void HandleTimer(ref AirlockStatus status)
-        {
-            var forceReset = (DateTime.UtcNow - lastTime).TotalSeconds >= MAX_WAIT_TIME;
-            if (forceReset && state != State.IDLE && state != State.COOLDOWN)
-            {
-                EnterState(State.IDLE);
-                descr = "Время ожидания истекло";
-                LcdText(ref status);
-                return;
-            }
-
-            switch (state)
-            {
-                case State.ENTER_DEPRESSURIZING:
-                    {
-                        var force = (DateTime.UtcNow - lastTime).TotalSeconds >= MAX_DEPRESSURIZE_TIME;
-                        if (status.AirVents.IsDepressurized || force)
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: false);
+                        ctx.Control.InternalDoor(open: false);
+                        ctx.Control.AuxDoors(open: false);
+                        ctx.Control.Airvents(pressurize: true);
+                        ctx.Control.Lights(LightMode.Red);
+                        break;
+                    case Event.TIMER:
+                        if (ctx.Status.IsObstructed)
                         {
-                            descr = force ? "Принуд. сброс давления" : "";
-                            EnterState(State.ENTER_DEPRESSURIZED);
+                            return ToState(OBSTRUCTED);
                         }
-                    }
-                    break;
-
-                case State.ENTER_OUTER_CLOSING:
-                    if (status.ExternalDoors.IsClosed)
-                    {
-                        EnterState(State.ENTER_PRESSURIZING);
-                    }
-                    break;
-
-                case State.ENTER_PRESSURIZING:
-                    {
-                        var force = (DateTime.UtcNow - lastTime).TotalSeconds >= MAX_PRESSURIZE_TIME;
-                        if (status.AirVents.IsPressurized || force)
+                        if (ctx.Time >= MAX_PRESSURIZE_TIME)
                         {
-                            descr = force ? "Принуд. набор давления" : "";
-                            EnterState(State.ENTER_PRESSURIZED);
+                            return ToState(IDLE);
                         }
-                    }
-                    break;
-
-                case State.EXIT_INNER_CLOSING:
-                    if (status.InternalDoors.IsClosed)
-                    {
-                        EnterState(State.EXIT_DEPRESSURIZING);
-                    }
-                    break;
-
-                case State.EXIT_DEPRESSURIZING:
-                    {
-                        var force = (DateTime.UtcNow - lastTime).TotalSeconds >= MAX_DEPRESSURIZE_TIME;
-                        if (status.AirVents.IsDepressurized || force)
+                        if (ctx.Status.AirVents.IsPressurized &&
+                            ctx.Status.ExternalDoors.IsClosed &&
+                            ctx.Status.InternalDoors.IsClosed)
                         {
-                            descr = force ? "Принуд. сброс давления" : "";
-                            EnterState(State.EXIT_OUTER_OPEN);
+                            return ToState(IDLE);
                         }
-                    }
-                    break;
+                        break;
+                }
 
-                case State.COOLDOWN:
-                    var cooldownOver = (DateTime.UtcNow - lastTime).TotalSeconds >= COOLDOWN_TIME;
-                    if (cooldownOver)
+                return null;
+            }
+
+            // Обнаружено препятствие
+            public static StateResult? OBSTRUCTED(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.Lights(LightMode.Red);
+                        break;
+                    case Event.TIMER:
+                        if (!ctx.Status.IsObstructed)
+                        {
+                            return ToState(COOLDOWN);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Сброс давления
+            public static StateResult? ENTER_DEPRESSURIZING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.Airvents(pressurize: false);
+                        ctx.Control.Lights(LightMode.Blink);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.IsObstructed)
+                        {
+                            return ToState(OBSTRUCTED);
+                        }
+                        if (ctx.Status.AirVents.IsDepressurized)
+                        {
+                            return ToState(ENTER_OUTER_OPENING);
+                        }
+                        if (ctx.Time >= MAX_DEPRESSURIZE_TIME)
+                        {
+                            return ToState(ENTER_OUTER_OPENING, "Принуд. сброс давления");
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Открытие двери (наружу)
+            public static StateResult? ENTER_OUTER_OPENING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: true);
+                        ctx.Control.Lights(LightMode.On);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.ExternalDoors.IsOpen)
+                        {
+                            return ToState(ENTER_OUTER_OPEN);
+                        }
+                        break;
+
+                    case Event.ENTER_SHIP_INSIDE:
+                        return ToState(ENTER_OUTER_CLOSING);
+                }
+
+                return null;
+            }
+
+            // Дверь открыта (наружу)
+            public static StateResult? ENTER_OUTER_OPEN(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: true);
+                        break;
+
+                    case Event.ENTER_SHIP_INSIDE:
+                        return ToState(ENTER_OUTER_CLOSING);
+
+                    case Event.TIMER:
+                        if (ctx.Time >= MAX_WAIT_TIME)
+                        {
+                            return ToState(WAIT_TIMED_OUT);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Закрытие двери (наружу)
+            public static StateResult? ENTER_OUTER_CLOSING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: false);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.ExternalDoors.IsClosed)
+                        {
+                            return ToState(ENTER_PRESSURIZING);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Набор давления
+            public static StateResult? ENTER_PRESSURIZING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.Airvents(pressurize: true);
+                        ctx.Control.Lights(LightMode.Blink);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.AirVents.IsPressurized)
+                        {
+                            return ToState(ENTER_INNER_OPENING);
+                        }
+                        if (ctx.Time >= MAX_PRESSURIZE_TIME)
+                        {
+                            return ToState(ENTER_INNER_OPENING, "Принуд. набор давления");
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Открытие двери (внутрь)
+            public static StateResult? ENTER_INNER_OPENING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: true);
+                        ctx.Control.Lights(LightMode.On);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.InternalDoors.IsOpen)
+                        {
+                            return ToState(ENTER_INNER_OPEN);
+                        }
+                        break;
+
+                    case Event.ENTER_SHIP_LEFT:
+                        return ToState(ENTER_INNER_CLOSING);
+                }
+
+                return null;
+            }
+
+            // Дверь открыта (внутрь)
+            public static StateResult? ENTER_INNER_OPEN(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: true);
+                        break;
+
+                    case Event.ENTER_SHIP_LEFT:
+                        return ToState(ENTER_INNER_CLOSING);
+                }
+
+                return null;
+            }
+
+            // Закрытие двери (внутрь)
+            public static StateResult? ENTER_INNER_CLOSING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: false);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.IsObstructed)
+                        {
+                            return ToState(OBSTRUCTED);
+                        }
+                        if (ctx.Status.InternalDoors.IsClosed)
+                        {
+                            return ToState(COOLDOWN);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+
+
+            // Открытие внутренней двери
+            public static StateResult? EXIT_INNER_OPENING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: true);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.InternalDoors.IsOpen)
+                        {
+                            return ToState(EXIT_INNER_OPEN);
+                        }
+                        break;
+
+                    case Event.EXIT_SHIP_INSIDE:
+                        return ToState(EXIT_INNER_CLOSING);
+                }
+
+                return null;
+            }
+
+            // Внутренняя дверь открыта
+            public static StateResult? EXIT_INNER_OPEN(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: true);
+                        break;
+
+                    case Event.EXIT_SHIP_INSIDE:
+                        return ToState(EXIT_INNER_CLOSING);
+
+                    case Event.TIMER:
+                        if (ctx.Time >= MAX_WAIT_TIME)
+                        {
+                            return ToState(WAIT_TIMED_OUT);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Закрытие внутренней двери
+            public static StateResult? EXIT_INNER_CLOSING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: false);
+                        ctx.Control.AuxDoors(open: false);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.InternalDoors.IsClosed)
+                        {
+                            return ToState(EXIT_DEPRESSURIZING);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Сброс давления
+            public static StateResult? EXIT_DEPRESSURIZING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.Airvents(pressurize: false);
+                        ctx.Control.Lights(LightMode.Blink);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.AirVents.IsDepressurized)
+                        {
+                            return ToState(EXIT_OUTER_OPENING);
+                        }
+                        if (ctx.Time >= MAX_DEPRESSURIZE_TIME)
+                        {
+                            return ToState(EXIT_OUTER_OPENING, "Принуд. сброс давления");
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Открытие внешней двери
+            public static StateResult? EXIT_OUTER_OPENING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: true);
+                        ctx.Control.Lights(LightMode.On);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.ExternalDoors.IsOpen)
+                        {
+                            return ToState(EXIT_OUTER_OPEN);
+                        }
+                        break;
+
+                    case Event.EXIT_SHIP_LEFT:
+                        return ToState(EXIT_OUTER_CLOSING);
+                }
+
+                return null;
+            }
+
+            // Внешняя дверь открыта
+            public static StateResult? EXIT_OUTER_OPEN(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        break;
+
+                    case Event.EXIT_SHIP_LEFT:
+                        return ToState(EXIT_OUTER_CLOSING);
+
+                    case Event.TIMER:
+                        if (ctx.Time >= MAX_WAIT_TIME)
+                        {
+                            return ToState(WAIT_TIMED_OUT);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            // Закрытие внешней двери
+            public static StateResult? EXIT_OUTER_CLOSING(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.ExternalDoor(open: false);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.IsObstructed)
+                        {
+                            return ToState(OBSTRUCTED);
+                        }
+                        if (ctx.Status.ExternalDoors.IsClosed)
+                        {
+                            return ToState(COOLDOWN);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+
+            // Закрытие внешней двери
+            public static StateResult? WAIT_TIMED_OUT(ref StateCtx ctx)
+            {
+                switch (ctx.Event)
+                {
+                    case Event.INIT:
+                        ctx.Control.InternalDoor(open: false);
+                        ctx.Control.ExternalDoor(open: false);
+                        ctx.Control.Lights(LightMode.Off);
+                        break;
+
+                    case Event.TIMER:
+                        if (ctx.Status.ExternalDoors.IsClosed && ctx.Status.InternalDoors.IsClosed)
+                        {
+                            return ToState(COOLDOWN);
+                        }
+                        break;
+                }
+
+                return null;
+            }
+
+            private StateFunc state = null;
+            private DateTime stateTime;
+            private string description = "";
+
+            private readonly Dictionary<StateFunc, string> stateNames;
+            private readonly Dictionary<StateFunc, string> stateDescriptions;
+            private readonly Dictionary<StateFunc, StateCategory> stateCategories;
+
+            public FSM()
+            {
+                stateNames = new Dictionary<StateFunc, string>
+                {
+                    {IDLE, nameof(IDLE) },
+                    {COOLDOWN, nameof(COOLDOWN) },
+                    {WAIT_TIMED_OUT, nameof(WAIT_TIMED_OUT) },
+                    {OBSTRUCTED                    , nameof(OBSTRUCTED) },
+
+                    {ENTER_DEPRESSURIZING, nameof(ENTER_DEPRESSURIZING) },
+                    {ENTER_OUTER_OPENING, nameof(ENTER_OUTER_OPENING) },
+                    {ENTER_OUTER_OPEN, nameof(ENTER_OUTER_OPEN) },
+                    {ENTER_OUTER_CLOSING, nameof(ENTER_OUTER_CLOSING) },
+                    {ENTER_PRESSURIZING, nameof(ENTER_PRESSURIZING) },
+                    {ENTER_INNER_OPENING, nameof(ENTER_INNER_OPENING) },
+                    {ENTER_INNER_OPEN, nameof(ENTER_INNER_OPEN) },
+                    {ENTER_INNER_CLOSING, nameof(ENTER_INNER_CLOSING) },
+
+                    {EXIT_INNER_OPENING, nameof(EXIT_INNER_OPENING) },
+                    {EXIT_INNER_OPEN, nameof(EXIT_INNER_OPEN) },
+                    {EXIT_INNER_CLOSING, nameof(EXIT_INNER_CLOSING) },
+                    {EXIT_DEPRESSURIZING, nameof(EXIT_DEPRESSURIZING) },
+                    {EXIT_OUTER_OPENING, nameof(EXIT_OUTER_OPENING) },
+                    {EXIT_OUTER_OPEN, nameof(EXIT_OUTER_OPEN) },
+                    {EXIT_OUTER_CLOSING, nameof(EXIT_OUTER_CLOSING) },
+                };
+
+                stateDescriptions = new Dictionary<StateFunc, string>
+                {
+                    { IDLE, "Готов" },
+                    { COOLDOWN, "Ожидание" },
+                    { WAIT_TIMED_OUT, "Время ожидания истекло" },
+                    { OBSTRUCTED, "Обнаружено препятствие" },
+
+                    { ENTER_DEPRESSURIZING, "Сброс давления" },
+                    { ENTER_OUTER_OPENING, "Открытие внеш. двери" },
+                    { ENTER_OUTER_OPEN, "Внеш. дверь открыта" },
+                    { ENTER_OUTER_CLOSING, "Закрытие внеш. двери" },
+                    { ENTER_PRESSURIZING, "Набор давления" },
+                    { ENTER_INNER_OPENING, "Открытие внутр. двери" },
+                    { ENTER_INNER_OPEN, "Внутр. дверь открыта" },
+                    { ENTER_INNER_CLOSING, "Закрытие внутр. двери" },
+
+                    { EXIT_INNER_OPENING, "Открытие внутр. двери" },
+                    { EXIT_INNER_OPEN, "Внутр. дверь открыта" },
+                    { EXIT_INNER_CLOSING, "Закрытие внутр. двери" },
+                    { EXIT_DEPRESSURIZING, "Сброс давления" },
+                    { EXIT_OUTER_OPENING, "Открытие внеш. двери" },
+                    { EXIT_OUTER_OPEN, "Внеш. дверь открыта" },
+                    { EXIT_OUTER_CLOSING, "Закрытие внеш. двери" },
+                };
+
+                stateCategories = new Dictionary<StateFunc, StateCategory>
+                {
+                    {IDLE,  StateCategory.Ready },
+
+                    {COOLDOWN, StateCategory.Locked },
+                    {WAIT_TIMED_OUT, StateCategory.Locked  },
+                    {OBSTRUCTED, StateCategory.Locked  },
+
+                    {ENTER_DEPRESSURIZING, StateCategory.Transition },
+                    {ENTER_OUTER_OPENING, StateCategory.Transition },
+                    {ENTER_OUTER_CLOSING, StateCategory.Transition },
+                    {ENTER_PRESSURIZING, StateCategory.Transition},
+                    {ENTER_INNER_OPENING, StateCategory.Transition },
+                    {ENTER_INNER_CLOSING, StateCategory.Transition },
+                    {EXIT_INNER_OPENING, StateCategory.Transition },
+                    {EXIT_INNER_CLOSING, StateCategory.Transition },
+                    {EXIT_DEPRESSURIZING, StateCategory.Transition },
+                    {EXIT_OUTER_OPENING, StateCategory.Transition },
+                    {EXIT_OUTER_CLOSING,StateCategory.Transition },
+
+                    {ENTER_OUTER_OPEN, StateCategory.InUse },
+                    {ENTER_INNER_OPEN, StateCategory.InUse},
+                    {EXIT_INNER_OPEN, StateCategory.InUse },
+                    {EXIT_OUTER_OPEN, StateCategory.InUse },
+                };
+            }
+
+            public string State => stateDescriptions.GetValueOrDefault(state, "НЕИЗВЕСТНО");
+            public string StateName => stateNames.GetValueOrDefault(state, "???");
+            public StateCategory StateCat => stateCategories.GetValueOrDefault(state, StateCategory.InUse);
+
+
+            public string Description => description;
+
+            public void Update(IController control, Event e, ref AirlockStatus status)
+            {
+                if (state == null || e == Event.RESET)
+                {
+                    state = IDLE;
+                    stateTime = DateTime.UtcNow;
+                    Update(control, Event.INIT, ref status);
+
+                    if (e == Event.RESET)
                     {
-                        EnterState(State.IDLE);
+                        return;
                     }
-                    break;
+                }
+
+                var ctx = new StateCtx
+                {
+                    Event = e,
+                    Status = status,
+                    Control = control,
+                    Time = (DateTime.UtcNow - stateTime).TotalSeconds
+                };
+                var result = state(ref ctx);
+                if (result != null)
+                {
+                    description = result.Value.Description;
+
+                    if (state != result.Value.NextState)
+                    {
+                        state = result.Value.NextState;
+                        stateTime = DateTime.UtcNow;
+
+                        Update(control, Event.INIT, ref status);
+                    }
+                }
             }
-
-            LcdText(ref status);
-        }
-
-        private void EnterState(State s)
-        {
-            switch (s)
-            {
-                case State.IDLE:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: true);
-                    break;
-                case State.COOLDOWN:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: true);
-                    break;
-
-                case State.ENTER_DEPRESSURIZING:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: false);
-                    break;
-                case State.ENTER_DEPRESSURIZED:
-                    ExternalDoor(open: true);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: false);
-                    break;
-                case State.ENTER_OUTER_CLOSING:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: false);
-                    break;
-                case State.ENTER_PRESSURIZING:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: true);
-                    break;
-                case State.ENTER_PRESSURIZED:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: true);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: true);
-                    break;
-
-
-                case State.EXIT_INNER_OPEN:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: true);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: true);
-                    break;
-                case State.EXIT_INNER_CLOSING:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: true);
-                    break;
-                case State.EXIT_DEPRESSURIZING:
-                    ExternalDoor(open: false);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: false);
-                    break;
-                case State.EXIT_OUTER_OPEN:
-                    ExternalDoor(open: true);
-                    InternalDoor(open: false);
-                    AuxDoors(open: false);
-                    Airvents(pressurize: false);
-                    break;
-            }
-
-            if (state != s)
-            {
-                lastTime = DateTime.UtcNow;
-                state = s;
-            }
-
-            Echo($"{state}");
         }
     }
 }

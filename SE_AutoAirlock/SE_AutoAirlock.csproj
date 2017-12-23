@@ -105,10 +105,10 @@
       <Private>False</Private>
     </Reference>
     <Reference Include="MDKUtilities">
-      <HintPath>C:\Users\Albert\AppData\Local\Microsoft\VisualStudio\15.0_9e96318b\Extensions\3fwsv4ez.n1u\MDKUtilities.dll</HintPath>
+      <HintPath>C:\Users\Albert\AppData\Local\Microsoft\VisualStudio\15.0_9e96318b\Extensions\up5kqjme.lj2\MDKUtilities.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Analyzer Include="C:\Users\Albert\AppData\Local\Microsoft\VisualStudio\15.0_9e96318b\Extensions\3fwsv4ez.n1u\Analyzers\MDKAnalyzer.dll" />
+    <Analyzer Include="C:\Users\Albert\AppData\Local\Microsoft\VisualStudio\15.0_9e96318b\Extensions\up5kqjme.lj2\Analyzers\MDKAnalyzer.dll" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Control.cs" />

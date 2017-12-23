@@ -1,6 +1,7 @@
 ﻿using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Game.ModAPI.Ingame;
 using System.Collections.Generic;
+using VRageMath;
 
 namespace IngameScript
 {
@@ -8,81 +9,162 @@ namespace IngameScript
     {
         private readonly List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
 
-        private void ExternalDoor(bool open)
+        interface IController
         {
-            ControlDoors(AL_DOOR_OUTER, open);
+            void ExternalDoor(bool open);
+            void InternalDoor(bool open);
+            void AuxDoors(bool open);
+            void Airvents(bool pressurize);
+            void Lights(LightMode mode);
+            void LcdText(string text);
         }
 
-        private void InternalDoor(bool open)
-        {
-            ControlDoors(AL_DOOR_INNER, open);
-        }
+        enum LightMode { Off, Blink, On, Red }
 
-        private void AuxDoors(bool open)
+        class Controller : IController
         {
-            ControlDoors(AL_DOOR_AUX, open);
-        }
+            private readonly List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
+            private readonly IMyGridTerminalSystem GridTerminalSystem;
 
-        private void Airvents(bool pressurize)
-        {
-            var group = GridTerminalSystem.GetBlockGroupWithName(AL_AIRVENTS);
-            if (group == null)
+            public Controller(IMyGridTerminalSystem grid)
             {
-                return;
+                GridTerminalSystem = grid;
             }
 
-            group.GetBlocks(blocks);
-            for (var i = 0; i < blocks.Count; i++)
+            public void Airvents(bool pressurize)
             {
-                ((IMyAirVent)blocks[i]).Depressurize = !pressurize;
-            }
-            blocks.Clear();
-        }
-
-        private void LcdText(ref AirlockStatus status)
-        {
-            var text = GetStatusText(ref status);
-
-            var group = GridTerminalSystem.GetBlockGroupWithName(AL_LCD);
-            if (group == null)
-            {
-                return;
-            }
-
-            group.GetBlocks(blocks);
-            for (var i = 0; i < blocks.Count; i++)
-            {
-                var panel = (IMyTextPanel)blocks[i];
-                panel.WritePublicText(text);
-                panel.ShowPublicTextOnScreen();
-                panel.FontSize = 1.0f;
-                panel.Font = "Monospace";
-            }
-            blocks.Clear();
-        }
-
-
-        private void ControlDoors(string groupName, bool open)
-        {
-            var group = GridTerminalSystem.GetBlockGroupWithName(groupName);
-            if (group == null)
-            {
-                return;
-            }
-
-            group.GetBlocks(blocks);
-            for (var i = 0; i < blocks.Count; i++)
-            {
-                if (open)
+                var group = GridTerminalSystem.GetBlockGroupWithName(AL_AIRVENTS);
+                if (group == null)
                 {
-                    ((IMyDoor)blocks[i]).OpenDoor();
+                    return;
                 }
-                else
+
+                group.GetBlocks(blocks);
+                for (var i = 0; i < blocks.Count; i++)
                 {
-                    ((IMyDoor)blocks[i]).CloseDoor();
+                    var airvent = blocks[i] as IMyAirVent;
+                    if (airvent == null)
+                    {
+                        continue;
+                    }
+
+                    airvent.Depressurize = !pressurize;
                 }
+                blocks.Clear();
             }
-            blocks.Clear();
+
+            public void AuxDoors(bool open)
+            {
+                ControlDoors(AL_DOOR_AUX, open);
+            }
+
+            public void ExternalDoor(bool open)
+            {
+                ControlDoors(AL_DOOR_OUTER, open);
+            }
+
+            public void InternalDoor(bool open)
+            {
+                ControlDoors(AL_DOOR_INNER, open);
+            }
+
+            public void LcdText(string text)
+            {
+                var group = GridTerminalSystem.GetBlockGroupWithName(AL_LCD);
+                if (group == null)
+                {
+                    return;
+                }
+
+                group.GetBlocks(blocks);
+                for (var i = 0; i < blocks.Count; i++)
+                {
+                    var panel = blocks[i] as IMyTextPanel;
+                    if (panel == null)
+                    {
+                        continue;
+                    }
+
+                    panel.WritePublicText(text);
+                    panel.ShowPublicTextOnScreen();
+                    panel.FontSize = 1.0f;
+                    panel.Font = "Monospace";
+                }
+                blocks.Clear();
+            }
+
+            public void Lights(LightMode mode)
+            {
+                var group = GridTerminalSystem.GetBlockGroupWithName(AL_LIGHTS);
+                if (group == null)
+                {
+                    return;
+                }
+
+                group.GetBlocks(blocks);
+                for (var i = 0; i < blocks.Count; i++)
+                {
+                    var light = blocks[i] as IMyLightingBlock;
+                    if (light == null)
+                    {
+                        continue;
+                    }
+
+                    switch (mode)
+                    {
+                        case LightMode.Off:
+                            light.Enabled = false;
+                            break;
+                        case LightMode.Blink:
+                            light.Enabled = true;
+                            light.BlinkIntervalSeconds = 0.75f;
+                            light.BlinkLength = 50f;
+                            light.Color = Color.Yellow;
+                            break;
+                        case LightMode.On:
+                            light.Enabled = true;
+                            light.BlinkIntervalSeconds = 0;
+                            light.Color = Color.White;
+                            break;
+                        case LightMode.Red:
+                            light.Enabled = true;
+                            light.BlinkIntervalSeconds = 0;
+                            light.Color = Color.Red;
+                            break;
+                    }
+                }
+                blocks.Clear();
+            }
+
+            private void ControlDoors(string groupName, bool open)
+            {
+                var group = GridTerminalSystem.GetBlockGroupWithName(groupName);
+                if (group == null)
+                {
+                    return;
+                }
+
+                group.GetBlocks(blocks);
+                for (var i = 0; i < blocks.Count; i++)
+                {
+                    var door = blocks[i] as IMyDoor;
+                    if (door == null)
+                    {
+                        continue;
+                    }
+
+                    if (open)
+                    {
+                        door.OpenDoor();
+                    }
+                    else
+                    {
+                        door.CloseDoor();
+                    }
+                }
+                blocks.Clear();
+            }
         }
     }
 }
+
